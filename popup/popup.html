@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RSS Spy</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="header">
+        <h1>RSS Spy</h1>
+        <p class="subtitle">Click a feed to copy its URL.</p>
+      </header>
+      <p id="state" class="state" role="status" aria-live="polite">Scanning this page...</p>
+      <ul id="feed-list" class="feed-list" aria-label="Detected feeds"></ul>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

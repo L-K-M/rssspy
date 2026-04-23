@@ -1,0 +1,22 @@
+# OS files
+.DS_Store
+
+# Editor/IDE files
+.idea/
+.vscode/
+*.swp
+*~
+
+# Extension packaging artifacts
+web-ext-artifacts/
+*.xpi
+
+# Logs and temp output
+*.log
+tmp/
+temp/
+
+# Optional JS tooling artifacts
+node_modules/
+coverage/
+dist/

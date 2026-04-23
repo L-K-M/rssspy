@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "RSS Spy",
+  "version": "1.0.0",
+  "description": "Discovers RSS, Atom, and JSON Feed URLs for the current site.",
+  "permissions": [
+    "tabs",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_title": "RSS Spy",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/rss.svg",
+      "32": "icons/rss.svg",
+      "48": "icons/rss.svg"
+    }
+  },
+  "icons": {
+    "48": "icons/rss.svg",
+    "96": "icons/rss.svg"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rssspy@example.com",
+      "strict_min_version": "115.0"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="RSS icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8a23d" />
+      <stop offset="1" stop-color="#c85f12" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)" />
+  <circle cx="18" cy="46" r="6" fill="#fff8ea" />
+  <path d="M10 30c13 0 24 11 24 24h-7c0-9-8-17-17-17z" fill="#fff8ea" />
+  <path d="M10 16c21 0 38 17 38 38h-7c0-17-14-31-31-31z" fill="#fff8ea" />
+</svg>

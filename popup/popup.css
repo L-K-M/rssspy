@@ -1,0 +1,128 @@
+:root {
+  --ink: #1a2a33;
+  --muted: #4a5d69;
+  --panel: rgba(255, 255, 255, 0.86);
+  --border: rgba(31, 41, 51, 0.18);
+  --accent: #c56b19;
+  --accent-strong: #9a4e0f;
+  --ok: #2d6a4f;
+  --bg: radial-gradient(circle at 20% 0%, #fdf8ee 0%, #f2f5e8 34%, #e3edf7 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 360px;
+  max-width: 420px;
+  min-height: 240px;
+  font-family: "Trebuchet MS", "Verdana", "Geneva", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.popup-shell {
+  padding: 14px;
+}
+
+.header {
+  margin-bottom: 10px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.03em;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.state {
+  margin: 0 0 10px;
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.state.success {
+  color: var(--ok);
+}
+
+.state.error {
+  color: #9b1c1c;
+}
+
+.feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.feed-item {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 130ms ease, transform 130ms ease, box-shadow 130ms ease;
+}
+
+.feed-item:hover {
+  border-color: var(--accent);
+  box-shadow: 0 8px 18px rgba(28, 32, 44, 0.16);
+  transform: translateY(-1px);
+}
+
+.feed-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.feed-title {
+  display: block;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.feed-url {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.feed-meta {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(197, 107, 25, 0.12);
+  color: var(--accent-strong);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.empty {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
