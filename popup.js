@@ -76,7 +76,7 @@ async function init() {
     setStatus(`Found ${feeds.length} feed${feeds.length > 1 ? "s" : ""}.`);
     renderFeeds(feeds);
   } catch (error) {
-    setStatus("Unable to inspect this page.");
+    setStatus("Unable to inspect this page (some browser/system pages are restricted).");
     console.error(error);
   }
 }
