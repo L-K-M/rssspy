@@ -43,7 +43,7 @@ web-ext build --overwrite-dest
 web-ext sign --api-key="[JWT issuer]" --api-secret="[JWT secret]" --channel="unlisted"
 ```
 
-This creates a ZIP file called `web-ext-artifacts/skip_that_noise-1.0.zip`, and the signed extension called `web-ext-artifacts/[id]-[version].xpi`.
+This creates a ZIP file called `web-ext-artifacts/rss_spy-1.0.0.zip`, and the signed extension called `web-ext-artifacts/[id]-[version].xpi`.
 
 ## 4. Install the signed extension:
 
