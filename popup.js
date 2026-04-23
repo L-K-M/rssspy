@@ -50,8 +50,13 @@ function renderFeeds(feeds) {
     copyButton.type = "button";
     copyButton.textContent = "Copy";
     copyButton.addEventListener("click", async () => {
-      await copyText(feed.href);
-      setStatus("Copied feed URL.");
+      try {
+        await copyText(feed.href);
+        setStatus("Copied feed URL.");
+      } catch (error) {
+        setStatus("Copy failed. Please try again.");
+        console.error(error);
+      }
     });
 
     item.append(label, copyButton);
