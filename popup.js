@@ -54,7 +54,7 @@ function renderFeeds(feeds) {
         await copyText(feed.href);
         setStatus("Copied feed URL.");
       } catch (error) {
-        setStatus("Copy failed. Please try again.");
+        setStatus(`Copy failed: ${error && error.message ? error.message : "please try again."}`);
         console.error(error);
       }
     });
