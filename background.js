@@ -9,6 +9,16 @@ const FEED_XML_PATTERN = /<(rss|feed|rdf:RDF)\b/i;
 const FEED_XML_NAMESPACE_PATTERN =
   /(http:\/\/www\.w3\.org\/2005\/Atom|http:\/\/purl\.org\/rss\/1\.0\/|http:\/\/purl\.org\/dc\/elements\/1\.1\/)/i;
 const JSON_FEED_PATTERN = /"version"\s*:\s*"https:\/\/jsonfeed\.org\/version\//i;
+const FEED_ICON_PATHS = {
+  16: "icons/rss.svg",
+  32: "icons/rss.svg",
+  48: "icons/rss.svg"
+};
+const NO_FEED_ICON_PATHS = {
+  16: "icons/no-rss.svg",
+  32: "icons/no-rss.svg",
+  48: "icons/no-rss.svg"
+};
 
 const tabState = new Map();
 
@@ -348,6 +358,7 @@ async function fetchWithTimeout(url, timeoutMs) {
 
 async function setScanningBadge(tabId) {
   try {
+    await setActionIcon(tabId, false);
     await browser.action.setBadgeBackgroundColor({
       tabId,
       color: "#5b7386"
@@ -368,6 +379,7 @@ async function setScanningBadge(tabId) {
 async function updateBadge(tabId, feedCount) {
   if (feedCount > 0) {
     try {
+      await setActionIcon(tabId, true);
       await browser.action.setBadgeBackgroundColor({
         tabId,
         color: "#d97706"
@@ -391,6 +403,7 @@ async function updateBadge(tabId, feedCount) {
 
 async function clearBadge(tabId) {
   try {
+    await setActionIcon(tabId, false);
     await browser.action.setBadgeText({
       tabId,
       text: ""
@@ -398,6 +411,18 @@ async function clearBadge(tabId) {
     await browser.action.setTitle({
       tabId,
       title: "RSS Spy"
+    });
+  } catch (_error) {
+    // Tab may no longer exist.
+  }
+}
+
+async function setActionIcon(tabId, hasFeed) {
+  const path = hasFeed ? FEED_ICON_PATHS : NO_FEED_ICON_PATHS;
+  try {
+    await browser.action.setIcon({
+      tabId,
+      path
     });
   } catch (_error) {
     // Tab may no longer exist.

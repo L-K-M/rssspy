@@ -19,9 +19,9 @@
     "default_title": "RSS Spy",
     "default_popup": "popup/popup.html",
     "default_icon": {
-      "16": "icons/rss.svg",
-      "32": "icons/rss.svg",
-      "48": "icons/rss.svg"
+      "16": "icons/no-rss.svg",
+      "32": "icons/no-rss.svg",
+      "48": "icons/no-rss.svg"
     }
   },
   "icons": {

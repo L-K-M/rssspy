@@ -10,7 +10,7 @@ This repository hosts a Firefox extension that discovers RSS/Atom/JSON feeds for
 - `popup/popup.html`: Popup shell.
 - `popup/popup.css`: Popup styling.
 - `popup/popup.js`: Popup rendering and clipboard copy behavior.
-- `icons/rss.svg`: Extension icon.
+- `icons/rss.svg`, `icons/no-rss.svg`: Toolbar icons for feed found vs. no feed found.
 - `PLAN.md`: Implementation plan and execution status.
 
 ## Agent guidelines

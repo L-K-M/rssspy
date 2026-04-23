@@ -21,7 +21,7 @@ RSS Spy is a Firefox WebExtension that detects RSS/Atom/JSON feeds for the curre
 - `popup/popup.html` - popup markup.
 - `popup/popup.css` - popup styles.
 - `popup/popup.js` - popup rendering and copy-to-clipboard behavior.
-- `icons/rss.svg` - extension icon.
+- `icons/rss.svg`, `icons/no-rss.svg` - toolbar icons for feed found vs. no feed found.
 - `PLAN.md` - implementation plan and status notes.
 - `AGENTS.md` - repository-specific contributor/agent guidance.
 
