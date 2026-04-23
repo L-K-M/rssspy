@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "rssspy",
+  "version": "1.0.0",
+  "description": "Checks the current website for RSS/Atom feeds and lets you copy feed URLs.",
+  "permissions": ["activeTab", "tabs", "clipboardWrite"],
+  "browser_action": {
+    "default_title": "rssspy",
+    "default_popup": "popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rssspy@l-k-m"
+    }
+  }
+}
