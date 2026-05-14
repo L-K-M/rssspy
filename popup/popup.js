@@ -2,12 +2,14 @@
 
 const stateElement = document.getElementById("state");
 const feedListElement = document.getElementById("feed-list");
+const versionElement = document.getElementById("version");
 
 document.addEventListener("DOMContentLoaded", () => {
   void initPopup();
 });
 
 async function initPopup() {
+  renderVersion();
   setState("Scanning this page...");
 
   try {
@@ -24,6 +26,15 @@ async function initPopup() {
     console.error("RSS Spy popup failed", error);
     setState("Unable to read feed data.", "error");
   }
+}
+
+function renderVersion() {
+  if (!versionElement || !browser.runtime || typeof browser.runtime.getManifest !== "function") {
+    return;
+  }
+
+  const manifest = browser.runtime.getManifest();
+  versionElement.textContent = manifest.version ? `Version ${manifest.version}` : "";
 }
 
 async function getActiveTab() {

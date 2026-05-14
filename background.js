@@ -2,6 +2,7 @@
 
 const MAX_CANDIDATES_TO_VALIDATE = 24;
 const FETCH_TIMEOUT_MS = 7000;
+const MAX_FEED_SAMPLE_BYTES = 65536;
 const MAX_REDIRECTS = 5;
 
 const NON_PUBLIC_HOSTNAMES = new Set([
@@ -237,16 +238,43 @@ async function verifyCandidates(candidates, pageUrl) {
 
 async function verifyCandidate(candidate, pageUrl) {
   try {
-    const result = await fetchWithTimeout(candidate.url, pageUrl, FETCH_TIMEOUT_MS);
-    const response = result.response;
-    if (!response.ok) {
-      return null;
-    }
+    return await fetchWithTimeout(candidate.url, pageUrl, FETCH_TIMEOUT_MS, async (result, signal) => {
+      const response = result.response;
+      if (!response.ok) {
+        cancelResponseBody(response);
+        return null;
+      }
 
-    const contentType = stringify(response.headers.get("content-type")).toLowerCase();
-    const finalUrl = result.finalUrl;
+      const contentType = stringify(response.headers.get("content-type")).toLowerCase();
+      const finalUrl = result.finalUrl;
 
-    if (contentType.includes("feed+json")) {
+      if (contentType.includes("feed+json")) {
+        cancelResponseBody(response);
+        return {
+          url: finalUrl,
+          title: candidate.title || titleFromUrl(finalUrl),
+          source: candidate.source,
+          confidence: candidate.confidence,
+          contentType: contentType || "unknown"
+        };
+      }
+
+      if (FEED_MIME_PATTERN.test(contentType) && !contentType.includes("json")) {
+        cancelResponseBody(response);
+        return {
+          url: finalUrl,
+          title: candidate.title || titleFromUrl(finalUrl),
+          source: candidate.source,
+          confidence: candidate.confidence,
+          contentType: contentType || "unknown"
+        };
+      }
+
+      const sample = await readResponseSample(response, MAX_FEED_SAMPLE_BYTES, signal);
+      if (!looksLikeFeed(sample, contentType, finalUrl)) {
+        return null;
+      }
+
       return {
         url: finalUrl,
         title: candidate.title || titleFromUrl(finalUrl),
@@ -254,32 +282,107 @@ async function verifyCandidate(candidate, pageUrl) {
         confidence: candidate.confidence,
         contentType: contentType || "unknown"
       };
-    }
-
-    if (FEED_MIME_PATTERN.test(contentType) && !contentType.includes("json")) {
-      return {
-        url: finalUrl,
-        title: candidate.title || titleFromUrl(finalUrl),
-        source: candidate.source,
-        confidence: candidate.confidence,
-        contentType: contentType || "unknown"
-      };
-    }
-
-    const sample = (await response.text()).slice(0, 12000);
-    if (!looksLikeFeed(sample, contentType, finalUrl)) {
-      return null;
-    }
-
-    return {
-      url: finalUrl,
-      title: candidate.title || titleFromUrl(finalUrl),
-      source: candidate.source,
-      confidence: candidate.confidence,
-      contentType: contentType || "unknown"
-    };
+    });
   } catch (_error) {
     return null;
+  }
+}
+
+async function readResponseSample(response, maxBytes, signal) {
+  if (contentLengthExceeds(response, maxBytes)) {
+    cancelResponseBody(response);
+    throw new Error("Feed candidate body is too large.");
+  }
+
+  if (!response.body || typeof response.body.getReader !== "function") {
+    throw new Error("Feed candidate response body is not streamable.");
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytesRead = 0;
+  let reachedLimit = false;
+
+  try {
+    while (bytesRead < maxBytes) {
+      if (signal && signal.aborted) {
+        throw new Error("Feed candidate body read timed out.");
+      }
+
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      if (!value || !value.byteLength) {
+        continue;
+      }
+
+      const remainingBytes = maxBytes - bytesRead;
+      if (value.byteLength > remainingBytes) {
+        chunks.push(value.slice(0, remainingBytes));
+        bytesRead += remainingBytes;
+        reachedLimit = true;
+        break;
+      }
+
+      chunks.push(value);
+      bytesRead += value.byteLength;
+
+      if (bytesRead >= maxBytes) {
+        reachedLimit = true;
+      }
+    }
+  } finally {
+    if (reachedLimit || (signal && signal.aborted)) {
+      try {
+        await reader.cancel();
+      } catch (_error) {
+        // Ignore stream cancellation failures; the fetch timeout still aborts the request.
+      }
+    }
+
+    if (typeof reader.releaseLock === "function") {
+      try {
+        reader.releaseLock();
+      } catch (_error) {
+        // Ignore release failures for already-closed streams.
+      }
+    }
+  }
+
+  return decodeByteChunks(chunks, bytesRead);
+}
+
+function contentLengthExceeds(response, maxBytes) {
+  const value = stringify(response.headers.get("content-length")).trim();
+  return /^\d+$/.test(value) && Number(value) > maxBytes;
+}
+
+function decodeByteChunks(chunks, totalBytes) {
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return new TextDecoder().decode(bytes);
+}
+
+function cancelResponseBody(response) {
+  if (!response.body || typeof response.body.cancel !== "function") {
+    return;
+  }
+
+  try {
+    const cancelResult = response.body.cancel();
+    if (cancelResult && typeof cancelResult.catch === "function") {
+      void cancelResult.catch(() => {});
+    }
+  } catch (_error) {
+    // Best-effort cancellation only.
   }
 }
 
@@ -656,12 +759,17 @@ function clampConfidence(value) {
   return Math.min(100, Math.max(0, Math.round(numeric)));
 }
 
-async function fetchWithTimeout(url, pageUrl, timeoutMs) {
+async function fetchWithTimeout(url, pageUrl, timeoutMs, handleResponse) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    return await fetchFollowingSafeRedirects(url, pageUrl, controller.signal);
+    const result = await fetchFollowingSafeRedirects(url, pageUrl, controller.signal);
+    if (typeof handleResponse === "function") {
+      return await handleResponse(result, controller.signal);
+    }
+
+    return result;
   } finally {
     clearTimeout(timeoutId);
   }
