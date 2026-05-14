@@ -6,10 +6,12 @@
 .vscode/
 *.swp
 *~
+build.sh
 
 # Extension packaging artifacts
 web-ext-artifacts/
 *.xpi
+.amo-upload-uuid
 
 # Logs and temp output
 *.log
