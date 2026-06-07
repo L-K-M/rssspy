@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "RSS Spy",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Discovers RSS, Atom, and JSON Feed URLs for the current site.",
   "permissions": [
     "tabs",
     "clipboardWrite",
-    "dns"
+    "dns",
+    "webRequest",
+    "webRequestBlocking"
   ],
   "host_permissions": [
     "<all_urls>"

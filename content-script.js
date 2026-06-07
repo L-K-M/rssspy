@@ -37,19 +37,22 @@
       const relLooksFeed = rel.includes("alternate") || rel.includes("feed") || rel.includes("service.feed");
       const typeLooksFeed = isFeedType(type);
       const urlLooksFeed = looksLikeFeedUrl(href);
+      // A feed MIME type or an explicit rel="feed" is an unambiguous declaration
+      // by the page author; rel="alternate" alone (e.g. AMP/translations) is not.
+      const declaresFeed = typeLooksFeed || rel.includes("feed");
 
       if (relLooksFeed && (typeLooksFeed || urlLooksFeed)) {
-        addCandidate(href, "meta-link", 100, title);
+        addCandidate(href, "meta-link", 100, title, declaresFeed);
         continue;
       }
 
       if (typeLooksFeed) {
-        addCandidate(href, "meta-link", 90, title);
+        addCandidate(href, "meta-link", 90, title, true);
         continue;
       }
 
       if (urlLooksFeed && rel.includes("alternate")) {
-        addCandidate(href, "meta-link", 80, title);
+        addCandidate(href, "meta-link", 80, title, declaresFeed);
       }
     }
   }
@@ -118,7 +121,7 @@
       const urlSuggestsFeed = looksLikeFeedUrl(href);
 
       if (isFeedType(type)) {
-        addCandidate(href, "page-link", 82, linkText);
+        addCandidate(href, "page-link", 82, linkText, true);
         continue;
       }
 
@@ -141,14 +144,14 @@
   function collectFromDocumentSignals() {
     const contentType = stringify(document.contentType).toLowerCase();
     if (isFeedType(contentType)) {
-      addCandidate(window.location.href, "document-content", 100, cleanTitle(document.title));
+      addCandidate(window.location.href, "document-content", 100, cleanTitle(document.title), true);
     }
 
     const rootName = document.documentElement
       ? stringify(document.documentElement.nodeName).toLowerCase()
       : "";
     if (rootName === "rss" || rootName === "feed" || rootName === "rdf:rdf") {
-      addCandidate(window.location.href, "document-content", 100, cleanTitle(document.title));
+      addCandidate(window.location.href, "document-content", 100, cleanTitle(document.title), true);
     }
 
     const sample = document.documentElement
@@ -156,7 +159,7 @@
       : "";
 
     if (sample.includes("<rss") || sample.includes("<feed") || sample.includes("jsonfeed.org/version/")) {
-      addCandidate(window.location.href, "document-content", 90, cleanTitle(document.title));
+      addCandidate(window.location.href, "document-content", 90, cleanTitle(document.title), true);
     }
 
     if (hasWordPressGeneratorMeta()) {
@@ -187,7 +190,7 @@
     }
   }
 
-  function addCandidate(rawUrl, source, confidence, title) {
+  function addCandidate(rawUrl, source, confidence, title, explicit) {
     const normalizedUrl = toHttpUrl(rawUrl, window.location.href);
     if (!normalizedUrl) {
       return;
@@ -197,15 +200,28 @@
       url: normalizedUrl,
       source,
       confidence: clampConfidence(confidence),
-      title: cleanTitle(title)
+      title: cleanTitle(title),
+      explicit: Boolean(explicit)
     };
 
     const existing = candidatesByUrl.get(candidate.url);
-    if (!existing || candidate.confidence > existing.confidence) {
+    if (!existing) {
       candidatesByUrl.set(candidate.url, candidate);
       return;
     }
 
+    if (candidate.confidence > existing.confidence) {
+      candidate.explicit = candidate.explicit || existing.explicit;
+      if (!candidate.title && existing.title) {
+        candidate.title = existing.title;
+      }
+      candidatesByUrl.set(candidate.url, candidate);
+      return;
+    }
+
+    if (candidate.explicit) {
+      existing.explicit = true;
+    }
     if (!existing.title && candidate.title) {
       existing.title = candidate.title;
     }
