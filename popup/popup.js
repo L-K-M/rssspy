@@ -19,7 +19,7 @@ async function initPopup() {
       return;
     }
 
-    const result = await fetchStateWithRetries(tab.id, 6, 250);
+    const result = await fetchStateWithRetries(tab.id, 10, 300);
 
     renderResult(result);
   } catch (error) {
@@ -43,20 +43,24 @@ async function getActiveTab() {
 }
 
 async function fetchStateWithRetries(tabId, maxAttempts, delayMs) {
+  let result = null;
+
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const result = await browser.runtime.sendMessage({
+    result = await browser.runtime.sendMessage({
       type: "rssspy:getFeeds",
       tabId
     });
 
-    if (!result || result.status !== "scanning" || attempt === maxAttempts - 1) {
+    if (!result || result.status !== "scanning") {
       return result;
     }
 
-    await sleep(delayMs);
+    if (attempt < maxAttempts - 1) {
+      await sleep(delayMs);
+    }
   }
 
-  return null;
+  return result;
 }
 
 function renderResult(result) {

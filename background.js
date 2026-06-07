@@ -2,8 +2,9 @@
 
 const MAX_CANDIDATES_TO_VALIDATE = 24;
 const FETCH_TIMEOUT_MS = 7000;
+const DNS_TIMEOUT_MS = 4000;
 const MAX_FEED_SAMPLE_BYTES = 65536;
-const MAX_REDIRECTS = 5;
+const VALIDATION_CONCURRENCY = 6;
 
 const NON_PUBLIC_HOSTNAMES = new Set([
   "localhost",
@@ -26,8 +27,12 @@ const NON_PUBLIC_HOSTNAME_SUFFIXES = [
   ".onion"
 ];
 
-const FEED_MIME_PATTERN =
-  /\b(application\/(rss\+xml|atom\+xml|feed\+json)|text\/(rss\+xml|atom\+xml|xml)|application\/xml)\b/i;
+// Specific feed content types that, on their own, identify a feed. Generic XML
+// (text/xml, application/xml) is deliberately excluded: a matching content type
+// is not enough, so those responses must still pass the body sniff below to
+// avoid treating sitemaps or arbitrary XML/JSON as feeds.
+const SPECIFIC_FEED_MIME_PATTERN =
+  /\b(application\/(rss\+xml|atom\+xml|feed\+json)|text\/(rss\+xml|atom\+xml))\b/i;
 const FEED_XML_PATTERN = /<(rss|feed|rdf:RDF)\b/i;
 const FEED_XML_NAMESPACE_PATTERN =
   /(http:\/\/www\.w3\.org\/2005\/Atom|http:\/\/purl\.org\/rss\/1\.0\/|http:\/\/purl\.org\/dc\/elements\/1\.1\/)/i;
@@ -42,6 +47,16 @@ const NO_FEED_ICON_PATHS = {
   32: "icons/no-rss.svg",
   48: "icons/no-rss.svg"
 };
+
+const EXTENSION_ORIGIN = readExtensionOrigin();
+
+// When the network guard is active we can safely let fetch follow redirects:
+// every hop (initial request and each redirect target) is re-checked against
+// the public-host policy by the webRequest listener below, so a redirect to an
+// internal/private address is blocked before the connection is made. If the
+// guard cannot be installed we fall back to refusing redirects entirely.
+let networkGuardActive = false;
+installNetworkGuard();
 
 const tabState = new Map();
 
@@ -105,11 +120,24 @@ async function ingestScanResult(tabId, payload) {
 
   try {
     const candidates = normalizeCandidates(rawCandidates, pageUrl);
-    const feeds = await verifyCandidates(candidates, pageUrl);
 
-    const latest = tabState.get(tabId);
-    if (!latest || latest.scanId !== nextScanId) {
+    // Validate page-provided candidates (declared feed links, content signals)
+    // first. Only fall back to probing guessed/heuristic paths when the page
+    // itself yielded no working feed, so feed-advertising sites are not hit with
+    // a burst of speculative /feed, /rss, ... requests on every visit.
+    const provided = candidates.filter((candidate) => candidate.source !== "heuristic");
+    const guessed = candidates.filter((candidate) => candidate.source === "heuristic");
+
+    let feeds = await verifyCandidates(provided, pageUrl);
+    if (isStaleScan(tabId, nextScanId)) {
       return;
+    }
+
+    if (feeds.length === 0 && guessed.length > 0) {
+      feeds = await verifyCandidates(guessed, pageUrl);
+      if (isStaleScan(tabId, nextScanId)) {
+        return;
+      }
     }
 
     tabState.set(tabId, {
@@ -122,8 +150,7 @@ async function ingestScanResult(tabId, payload) {
 
     await updateBadge(tabId, feeds.length);
   } catch (error) {
-    const latest = tabState.get(tabId);
-    if (!latest || latest.scanId !== nextScanId) {
+    if (isStaleScan(tabId, nextScanId)) {
       return;
     }
 
@@ -138,6 +165,11 @@ async function ingestScanResult(tabId, payload) {
     await clearBadge(tabId);
     console.error("RSS Spy failed to process scan", error);
   }
+}
+
+function isStaleScan(tabId, scanId) {
+  const latest = tabState.get(tabId);
+  return !latest || latest.scanId !== scanId;
 }
 
 function readStateForTab(tabId) {
@@ -169,11 +201,23 @@ function normalizeCandidates(rawCandidates, pageUrl) {
     }
 
     const existing = byUrl.get(normalized.url);
-    if (!existing || normalized.confidence > existing.confidence) {
+    if (!existing) {
       byUrl.set(normalized.url, normalized);
       continue;
     }
 
+    if (normalized.confidence > existing.confidence) {
+      normalized.explicit = normalized.explicit || existing.explicit;
+      if (!normalized.title && existing.title) {
+        normalized.title = existing.title;
+      }
+      byUrl.set(normalized.url, normalized);
+      continue;
+    }
+
+    if (normalized.explicit) {
+      existing.explicit = true;
+    }
     if (!existing.title && normalized.title) {
       existing.title = normalized.title;
     }
@@ -189,6 +233,7 @@ function normalizeCandidate(rawCandidate, pageUrl) {
   let source = "unknown";
   let confidence = 50;
   let title = "";
+  let explicit = false;
 
   if (typeof rawCandidate === "string") {
     rawUrl = rawCandidate;
@@ -197,6 +242,7 @@ function normalizeCandidate(rawCandidate, pageUrl) {
     source = stringify(rawCandidate.source) || "unknown";
     confidence = clampConfidence(rawCandidate.confidence);
     title = cleanTitle(rawCandidate.title);
+    explicit = Boolean(rawCandidate.explicit);
   }
 
   const url = toHttpUrl(rawUrl, pageUrl);
@@ -204,7 +250,7 @@ function normalizeCandidate(rawCandidate, pageUrl) {
     return null;
   }
 
-  if (!canValidateCandidateUrl(url, pageUrl)) {
+  if (!canValidateCandidateUrl(url, pageUrl, explicit)) {
     return null;
   }
 
@@ -212,15 +258,20 @@ function normalizeCandidate(rawCandidate, pageUrl) {
     url,
     source,
     confidence,
+    explicit,
     title: title || titleFromUrl(url)
   };
 }
 
 async function verifyCandidates(candidates, pageUrl) {
-  const verifiedByUrl = new Map();
+  const results = await mapWithConcurrency(
+    candidates,
+    VALIDATION_CONCURRENCY,
+    (candidate) => verifyCandidate(candidate, pageUrl)
+  );
 
-  for (const candidate of candidates) {
-    const feed = await verifyCandidate(candidate, pageUrl);
+  const verifiedByUrl = new Map();
+  for (const feed of results) {
     if (!feed) {
       continue;
     }
@@ -238,54 +289,48 @@ async function verifyCandidates(candidates, pageUrl) {
 
 async function verifyCandidate(candidate, pageUrl) {
   try {
-    return await fetchWithTimeout(candidate.url, pageUrl, FETCH_TIMEOUT_MS, async (result, signal) => {
-      const response = result.response;
+    return await withTimeout(FETCH_TIMEOUT_MS, async (signal) => {
+      const { response, finalUrl } = await fetchCandidate(
+        candidate.url,
+        pageUrl,
+        candidate.explicit,
+        signal
+      );
+
       if (!response.ok) {
         cancelResponseBody(response);
         return null;
       }
 
       const contentType = stringify(response.headers.get("content-type")).toLowerCase();
-      const finalUrl = result.finalUrl;
 
-      if (contentType.includes("feed+json")) {
+      // Trust only unambiguous feed content types without inspecting the body.
+      if (SPECIFIC_FEED_MIME_PATTERN.test(contentType)) {
         cancelResponseBody(response);
-        return {
-          url: finalUrl,
-          title: candidate.title || titleFromUrl(finalUrl),
-          source: candidate.source,
-          confidence: candidate.confidence,
-          contentType: contentType || "unknown"
-        };
+        return makeFeed(candidate, finalUrl, contentType);
       }
 
-      if (FEED_MIME_PATTERN.test(contentType) && !contentType.includes("json")) {
-        cancelResponseBody(response);
-        return {
-          url: finalUrl,
-          title: candidate.title || titleFromUrl(finalUrl),
-          source: candidate.source,
-          confidence: candidate.confidence,
-          contentType: contentType || "unknown"
-        };
-      }
-
+      // Everything else (generic XML, JSON, HTML, unknown) must look like a feed.
       const sample = await readResponseSample(response, MAX_FEED_SAMPLE_BYTES, signal);
-      if (!looksLikeFeed(sample, contentType, finalUrl)) {
+      if (!looksLikeFeed(sample, contentType)) {
         return null;
       }
 
-      return {
-        url: finalUrl,
-        title: candidate.title || titleFromUrl(finalUrl),
-        source: candidate.source,
-        confidence: candidate.confidence,
-        contentType: contentType || "unknown"
-      };
+      return makeFeed(candidate, finalUrl, contentType);
     });
   } catch (_error) {
     return null;
   }
+}
+
+function makeFeed(candidate, finalUrl, contentType) {
+  return {
+    url: finalUrl,
+    title: candidate.title || titleFromUrl(finalUrl),
+    source: candidate.source,
+    confidence: candidate.confidence,
+    contentType: contentType || "unknown"
+  };
 }
 
 async function readResponseSample(response, maxBytes, signal) {
@@ -386,7 +431,7 @@ function cancelResponseBody(response) {
   }
 }
 
-function looksLikeFeed(sample, contentType, url) {
+function looksLikeFeed(sample, contentType) {
   const text = stringify(sample).trimStart();
   const lowerType = stringify(contentType).toLowerCase();
 
@@ -398,25 +443,11 @@ function looksLikeFeed(sample, contentType, url) {
     return true;
   }
 
-  if (FEED_MIME_PATTERN.test(lowerType) && (FEED_XML_PATTERN.test(text) || text.startsWith("<?xml"))) {
-    return true;
-  }
-
   if (FEED_XML_PATTERN.test(text)) {
     return true;
   }
 
-  if (FEED_XML_NAMESPACE_PATTERN.test(text) && /<(item|entry|channel)\b/i.test(text)) {
-    return true;
-  }
-
-  return looksLikeFeedPath(url) && FEED_XML_PATTERN.test(text);
-}
-
-function looksLikeFeedPath(url) {
-  return /(\/feed(?:\/|$|\?)|\/rss(?:\/|$|\?)|\/atom(?:\.xml)?$|\.rss($|\?)|\.atom($|\?)|\.xml($|\?))/i.test(
-    stringify(url)
-  );
+  return FEED_XML_NAMESPACE_PATTERN.test(text) && /<(item|entry|channel)\b/i.test(text);
 }
 
 function toHttpUrl(rawUrl, baseUrl) {
@@ -450,7 +481,19 @@ function parseHttpUrl(rawUrl, baseUrl) {
   }
 }
 
-function canValidateCandidateUrl(rawUrl, pageUrl) {
+function hostnameOf(rawUrl) {
+  const parsed = parseHttpUrl(rawUrl);
+  return parsed ? parsed.hostname : "";
+}
+
+// Policy gate deciding whether a candidate URL is allowed to be requested at all.
+// `explicit` candidates (feeds the page actually declares, e.g. a
+// <link rel="alternate" type="application/rss+xml">) may live on another origin,
+// so the same-site requirement is relaxed for them. Guessed/heuristic candidates
+// remain same-site to avoid issuing speculative cross-site requests. SSRF
+// protection (public hostnames only, plus DNS checks elsewhere) applies in both
+// cases.
+function canValidateCandidateUrl(rawUrl, pageUrl, explicit) {
   const candidateUrl = parseHttpUrl(rawUrl);
   const sourcePageUrl = parseHttpUrl(pageUrl);
 
@@ -458,20 +501,30 @@ function canValidateCandidateUrl(rawUrl, pageUrl) {
     return false;
   }
 
-  return (
-    isPublicHostname(candidateUrl.hostname) &&
-    isPublicHostname(sourcePageUrl.hostname) &&
-    isSameOriginOrSite(candidateUrl, sourcePageUrl)
-  );
-}
-
-async function canFetchCandidateUrl(rawUrl, pageUrl) {
-  const candidateUrl = parseHttpUrl(rawUrl);
-  if (!candidateUrl || !canValidateCandidateUrl(candidateUrl.href, pageUrl)) {
+  if (!isPublicHostname(candidateUrl.hostname) || !isPublicHostname(sourcePageUrl.hostname)) {
     return false;
   }
 
-  return resolvesToPublicAddresses(candidateUrl.hostname);
+  if (explicit) {
+    return true;
+  }
+
+  return isSameOriginOrSite(candidateUrl, sourcePageUrl);
+}
+
+// Decides whether the very first request for a candidate may proceed. When the
+// network guard is active it re-checks DNS for every hop, so we avoid resolving
+// twice here; otherwise we must resolve the initial host ourselves.
+async function isInitialCandidateAllowed(rawUrl, pageUrl, explicit) {
+  if (!canValidateCandidateUrl(rawUrl, pageUrl, explicit)) {
+    return false;
+  }
+
+  if (networkGuardActive) {
+    return true;
+  }
+
+  return resolvesToPublicAddresses(hostnameOf(rawUrl));
 }
 
 function isSameOriginOrSite(candidateUrl, sourcePageUrl) {
@@ -717,13 +770,23 @@ async function resolvesToPublicAddresses(hostname) {
   }
 
   try {
-    const record = await browser.dns.resolve(host);
+    const record = await withDnsTimeout(browser.dns.resolve(host), DNS_TIMEOUT_MS);
     const addresses = record && Array.isArray(record.addresses) ? record.addresses : [];
 
     return addresses.length > 0 && addresses.every((address) => isPublicHostname(address));
   } catch (_error) {
+    // Fail closed: an unresolved or slow host is treated as unsafe.
     return false;
   }
+}
+
+function withDnsTimeout(promise, timeoutMs) {
+  let timeoutId;
+  const timeout = new Promise((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("DNS resolution timed out.")), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 function titleFromUrl(rawUrl) {
@@ -759,72 +822,151 @@ function clampConfidence(value) {
   return Math.min(100, Math.max(0, Math.round(numeric)));
 }
 
-async function fetchWithTimeout(url, pageUrl, timeoutMs, handleResponse) {
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = new Array(workerCount).fill(null).map(async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await mapper(items[index], index);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function withTimeout(timeoutMs, run) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const result = await fetchFollowingSafeRedirects(url, pageUrl, controller.signal);
-    if (typeof handleResponse === "function") {
-      return await handleResponse(result, controller.signal);
-    }
-
-    return result;
+    return await run(controller.signal);
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function fetchFollowingSafeRedirects(url, pageUrl, signal) {
-  let currentUrl = toHttpUrl(url);
-
-  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-    if (!currentUrl || !(await canFetchCandidateUrl(currentUrl, pageUrl))) {
-      throw new Error("Unsafe feed validation URL.");
-    }
-
-    const response = await fetch(currentUrl, {
-      method: "GET",
-      redirect: "manual",
-      cache: "no-store",
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-      signal
-    });
-
-    const responseUrl = toHttpUrl(response.url, currentUrl) || currentUrl;
-    if (!(await canFetchCandidateUrl(responseUrl, pageUrl))) {
-      throw new Error("Unsafe feed validation response URL.");
-    }
-
-    if (response.type === "opaqueredirect") {
-      throw new Error("Hidden feed validation redirect.");
-    }
-
-    if (!isRedirectResponse(response)) {
-      return {
-        response,
-        finalUrl: responseUrl
-      };
-    }
-
-    if (redirectCount === MAX_REDIRECTS) {
-      throw new Error("Too many feed validation redirects.");
-    }
-
-    const nextUrl = toHttpUrl(response.headers.get("location"), responseUrl);
-    if (!nextUrl || !(await canFetchCandidateUrl(nextUrl, pageUrl))) {
-      throw new Error("Unsafe feed validation redirect.");
-    }
-
-    currentUrl = nextUrl;
+async function fetchCandidate(url, pageUrl, explicit, signal) {
+  const startUrl = toHttpUrl(url);
+  if (!startUrl || !(await isInitialCandidateAllowed(startUrl, pageUrl, explicit))) {
+    throw new Error("Unsafe feed validation URL.");
   }
 
-  throw new Error("Too many feed validation redirects.");
+  const response = await fetch(startUrl, {
+    method: "GET",
+    redirect: networkGuardActive ? "follow" : "manual",
+    cache: "no-store",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    signal
+  });
+
+  // Without the network guard we cannot vet a redirect target before the
+  // connection happens, so an opaque redirect is rejected rather than followed.
+  if (response.type === "opaqueredirect") {
+    throw new Error("Feed validation redirect could not be verified.");
+  }
+
+  const finalUrl = toHttpUrl(response.url, startUrl) || startUrl;
+  if (!isPublicHostname(hostnameOf(finalUrl))) {
+    throw new Error("Unsafe final feed validation URL.");
+  }
+
+  return { response, finalUrl };
 }
 
-function isRedirectResponse(response) {
-  return response.status >= 300 && response.status < 400;
+function readExtensionOrigin() {
+  try {
+    if (browser.runtime && typeof browser.runtime.getURL === "function") {
+      return new URL(browser.runtime.getURL("/")).origin;
+    }
+  } catch (_error) {
+    // Fall through to the empty-origin guard below.
+  }
+  return "";
+}
+
+// Re-validates every network request the extension itself initiates, including
+// each redirect hop, and cancels any that target a non-public host. This is what
+// makes following redirects safe: a candidate that 30x-redirects toward an
+// internal/private address never reaches the network.
+function installNetworkGuard() {
+  if (!EXTENSION_ORIGIN) {
+    return;
+  }
+
+  if (!browser.webRequest || !browser.webRequest.onBeforeRequest) {
+    console.warn(
+      "RSS Spy: webRequest guard unavailable; redirects will not be followed during validation."
+    );
+    return;
+  }
+
+  try {
+    browser.webRequest.onBeforeRequest.addListener(
+      guardValidationRequest,
+      { urls: ["http://*/*", "https://*/*"] },
+      ["blocking"]
+    );
+    networkGuardActive = true;
+  } catch (error) {
+    networkGuardActive = false;
+    console.warn(
+      "RSS Spy: could not install webRequest guard; redirects will not be followed.",
+      error
+    );
+  }
+}
+
+function guardValidationRequest(details) {
+  // Only police the extension's own background validation requests; ordinary tab
+  // traffic is returned synchronously so normal browsing is never delayed.
+  if (!isOwnValidationRequest(details)) {
+    return {};
+  }
+
+  return checkOwnRequest(details);
+}
+
+function isOwnValidationRequest(details) {
+  if (!details) {
+    return false;
+  }
+
+  // Match on the initiating origin only. A web page cannot forge a
+  // moz-extension:// origin, and every request the extension issues carries it
+  // (including redirect hops), so this both isolates our own requests and avoids
+  // a fail-open gap if the request type/tabId were ever classified differently.
+  const origin = stringify(details.originUrl) || stringify(details.documentUrl);
+  return Boolean(origin) && origin.startsWith(EXTENSION_ORIGIN);
+}
+
+async function checkOwnRequest(details) {
+  let hostname;
+  try {
+    hostname = new URL(details.url).hostname;
+  } catch (_error) {
+    return { cancel: true };
+  }
+
+  const host = normalizeHostname(hostname);
+  if (!isPublicHostname(host)) {
+    return { cancel: true };
+  }
+
+  if (isIpAddress(host)) {
+    return {};
+  }
+
+  const isPublic = await resolvesToPublicAddresses(host);
+  return isPublic ? {} : { cancel: true };
 }
 
 async function setScanningBadge(tabId) {

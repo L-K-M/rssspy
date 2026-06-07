@@ -13,6 +13,18 @@ RSS Spy is a Firefox extension that detects RSS/Atom/JSON feeds for the currentl
 - Shows a feed list in the popup when the icon is clicked.
 - Copies a feed URL to the clipboard when a feed item is clicked.
 
+# Permissions
+
+RSS Spy requests the following permissions:
+
+- `tabs`: identify the active tab so the popup can show feeds for the page you are viewing.
+- `clipboardWrite`: copy a feed URL when you click it in the popup.
+- `dns`: resolve candidate feed hostnames so requests to private/internal addresses can be blocked before they are sent.
+- `webRequest` / `webRequestBlocking`: re-check every validation request the extension makes — including each redirect hop — and cancel any that target a non-public address. This is what lets the extension safely follow redirects while still avoiding requests to internal hosts.
+- `<all_urls>` (host permission): read the current page and fetch its candidate feed URLs for validation.
+
+The extension only fetches feed candidates that belong to the site you are visiting; feeds hosted on another domain are fetched only when the page explicitly declares them (for example via `<link rel="alternate" type="application/rss+xml">`).
+
 # Temporary Installation
 
 1. Open `about:debugging` in Firefox.
@@ -43,7 +55,7 @@ web-ext build --overwrite-dest
 web-ext sign --api-key="[JWT issuer]" --api-secret="[JWT secret]" --channel="unlisted"
 ```
 
-This creates a ZIP file called `web-ext-artifacts/rss_spy-1.0.0.zip`, and the signed extension called `web-ext-artifacts/[id]-[version].xpi`.
+This creates a ZIP file called `web-ext-artifacts/rss_spy-1.0.3.zip`, and the signed extension called `web-ext-artifacts/[id]-[version].xpi`.
 
 ## 4. Install the signed extension:
 
