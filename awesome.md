@@ -237,6 +237,9 @@ global "explicit candidates only" privacy mode.
 
 ---
 
-*Companion PRs implement: B1+G5 manifest/state hardening, B2+F1–F5 popup &
-metadata upgrades, B4+B5+I1 content-script detection upgrades, and a
-`web-ext lint` CI workflow.*
+*Companion PRs: [#4](https://github.com/L-K-M/rssspy/pull/4) implements B1
+(state persistence + manifest hardening), [#5](https://github.com/L-K-M/rssspy/pull/5)
+implements B2 + F1–F5 (popup & metadata upgrades),
+[#6](https://github.com/L-K-M/rssspy/pull/6) implements B4 + B5 + I1
+(content-script detection upgrades), and
+[#7](https://github.com/L-K-M/rssspy/pull/7) implements G5 (CI workflow).*
