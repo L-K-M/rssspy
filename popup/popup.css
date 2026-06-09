@@ -6,7 +6,30 @@
     --accent: #c56b19;
     --accent-strong: #9a4e0f;
     --ok: #2d6a4f;
+    --error: #9b1c1c;
+    --chip-bg: rgba(197, 107, 25, 0.12);
+    --declared-bg: rgba(45, 106, 79, 0.14);
+    --declared-ink: #2d6a4f;
+    --shadow: rgba(28, 32, 44, 0.16);
     --bg: radial-gradient(circle at 20% 0%, #fdf8ee 0%, #f2f5e8 34%, #e3edf7 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ink: #e8eef2;
+        --muted: #9fb1bc;
+        --panel: rgba(34, 44, 53, 0.88);
+        --border: rgba(214, 226, 235, 0.18);
+        --accent: #e8923c;
+        --accent-strong: #f0ab63;
+        --ok: #6fc79e;
+        --error: #f08f8f;
+        --chip-bg: rgba(232, 146, 60, 0.18);
+        --declared-bg: rgba(111, 199, 158, 0.16);
+        --declared-ink: #6fc79e;
+        --shadow: rgba(0, 0, 0, 0.4);
+        --bg: radial-gradient(circle at 20% 0%, #232b33 0%, #1c242c 34%, #161d26 100%);
+    }
 }
 
 * {
@@ -55,7 +78,7 @@ body {
 }
 
 .state.error {
-    color: #9b1c1c;
+    color: var(--error);
 }
 
 .feed-list {
@@ -83,7 +106,7 @@ body {
 
 .feed-item:hover {
     border-color: var(--accent);
-    box-shadow: 0 8px 18px rgba(28, 32, 44, 0.16);
+    box-shadow: 0 8px 18px var(--shadow);
     transform: translateY(-1px);
 }
 
@@ -107,16 +130,27 @@ body {
     word-break: break-all;
 }
 
-.feed-meta {
-    display: inline-block;
+.feed-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
     margin-top: 6px;
+}
+
+.feed-chip {
+    display: inline-block;
     padding: 1px 6px;
     border-radius: 999px;
-    background: rgba(197, 107, 25, 0.12);
+    background: var(--chip-bg);
     color: var(--accent-strong);
     font-size: 10px;
     letter-spacing: 0.05em;
     text-transform: uppercase;
+}
+
+.feed-chip.feed-declared {
+    background: var(--declared-bg);
+    color: var(--declared-ink);
 }
 
 .empty {

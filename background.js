@@ -304,33 +304,121 @@ async function verifyCandidate(candidate, pageUrl) {
 
       const contentType = stringify(response.headers.get("content-type")).toLowerCase();
 
-      // Trust only unambiguous feed content types without inspecting the body.
-      if (SPECIFIC_FEED_MIME_PATTERN.test(contentType)) {
+      // Unambiguous feed content types are trusted without a body sniff, but the
+      // sample is still read (best-effort) so the feed's own title and format can
+      // be extracted for the popup.
+      const trustedType = SPECIFIC_FEED_MIME_PATTERN.test(contentType);
+
+      let sample = "";
+      try {
+        sample = await readResponseSample(response, MAX_FEED_SAMPLE_BYTES, signal);
+      } catch (error) {
+        // An unreadable/oversized body disqualifies untrusted candidates; trusted
+        // content types still validate, just without extracted metadata.
+        if (!trustedType) {
+          throw error;
+        }
         cancelResponseBody(response);
-        return makeFeed(candidate, finalUrl, contentType);
       }
 
       // Everything else (generic XML, JSON, HTML, unknown) must look like a feed.
-      const sample = await readResponseSample(response, MAX_FEED_SAMPLE_BYTES, signal);
-      if (!looksLikeFeed(sample, contentType)) {
+      if (!trustedType && !looksLikeFeed(sample, contentType)) {
         return null;
       }
 
-      return makeFeed(candidate, finalUrl, contentType);
+      return makeFeed(candidate, finalUrl, contentType, sample);
     });
   } catch (_error) {
     return null;
   }
 }
 
-function makeFeed(candidate, finalUrl, contentType) {
+function makeFeed(candidate, finalUrl, contentType, sample) {
+  const format = detectFeedFormat(sample, contentType);
+
   return {
     url: finalUrl,
-    title: candidate.title || titleFromUrl(finalUrl),
+    // The feed's self-declared title beats anything derived from the linking page.
+    title: extractFeedTitle(sample, format) || candidate.title || titleFromUrl(finalUrl),
     source: candidate.source,
     confidence: candidate.confidence,
+    explicit: Boolean(candidate.explicit),
+    format,
     contentType: contentType || "unknown"
   };
+}
+
+function detectFeedFormat(sample, contentType) {
+  const type = stringify(contentType).toLowerCase();
+  if (type.includes("atom+xml")) {
+    return "atom";
+  }
+  if (type.includes("rss+xml")) {
+    return "rss";
+  }
+  if (type.includes("feed+json")) {
+    return "json";
+  }
+
+  const text = stringify(sample);
+  if (JSON_FEED_PATTERN.test(text)) {
+    return "json";
+  }
+  if (/<feed\b/i.test(text) || text.includes("http://www.w3.org/2005/Atom")) {
+    return "atom";
+  }
+  if (/<(rss|rdf:RDF)\b/i.test(text) || FEED_XML_NAMESPACE_PATTERN.test(text)) {
+    return "rss";
+  }
+  return "unknown";
+}
+
+// Pulls the feed's own title out of the body sample. For RSS the first <title>
+// is the channel title and for Atom it is the feed title, so the first match in
+// document order is the right one in both formats.
+function extractFeedTitle(sample, format) {
+  const text = stringify(sample);
+  if (!text) {
+    return "";
+  }
+
+  if (format === "json") {
+    const match = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text);
+    return match ? cleanTitle(decodeJsonString(match[1])) : "";
+  }
+
+  const match = /<title[^>]*>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/title>/i.exec(text);
+  return match ? cleanTitle(decodeXmlEntities(match[1])) : "";
+}
+
+function decodeJsonString(value) {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch (_error) {
+    return value;
+  }
+}
+
+function decodeXmlEntities(value) {
+  return stringify(value)
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => safeCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, dec) => safeCodePoint(parseInt(dec, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function safeCodePoint(codePoint) {
+  if (!Number.isInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff) {
+    return "";
+  }
+  try {
+    return String.fromCodePoint(codePoint);
+  } catch (_error) {
+    return "";
+  }
 }
 
 async function readResponseSample(response, maxBytes, signal) {
