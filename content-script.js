@@ -10,6 +10,10 @@
     /\b(application\/(rss\+xml|atom\+xml|feed\+json)|text\/(rss\+xml|atom\+xml|xml)|application\/xml)\b/i;
   const FEED_URL_PATTERN =
     /(\/feed(?:\/|$|\?)|\/rss(?:\/|$|\?)|\/atom(?:\.xml)?$|\.rss($|\?)|\.atom($|\?)|\.xml($|\?)|jsonfeed)/i;
+  // Well-known XML files that match the bare `.xml` rule above but are never
+  // feeds; rejecting them up front saves candidate budget and probe requests.
+  const NON_FEED_URL_PATTERN =
+    /((^|\/)(sitemap[\w.-]*|wp-sitemap[\w.-]*|browserconfig|crossdomain|opensearch[\w.-]*)\.xml)($|\?)/i;
   const FEED_TEXT_PATTERN = /\b(rss|atom|feed|subscribe)\b/i;
 
   const candidatesByUrl = new Map();
@@ -18,6 +22,7 @@
   collectFromMetaTags();
   collectFromAnchors();
   collectFromDocumentSignals();
+  collectFromSiteRecipes();
   collectFromHeuristicPaths();
   sendScanResults();
 
@@ -83,7 +88,10 @@
         continue;
       }
 
-      if (metaSuggestsFeed) {
+      // A feed-ish meta name alone is a weak signal; require the content to at
+      // least look like a URL so values like "12" or "WordPress" don't resolve
+      // into junk same-site candidates.
+      if (metaSuggestsFeed && looksLikeUrlValue(content)) {
         addCandidate(content, "meta-tag", 64, "Meta feed hint");
         continue;
       }
@@ -167,6 +175,95 @@
     }
   }
 
+  // Recipes for well-known sites that have feeds but do not advertise them in
+  // their markup. All recipe URLs stay on the current site (or a sibling
+  // subdomain) so the background's same-site policy for non-explicit candidates
+  // holds. The candidates are still validated like any other, so a recipe that
+  // stops working simply yields nothing. Source is "site-recipe" (not
+  // "heuristic") because these are near-certain hits that deserve validation in
+  // the first batch.
+  function collectFromSiteRecipes() {
+    const host = window.location.hostname.toLowerCase();
+    const path = window.location.pathname;
+
+    if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+      const channelId = findYouTubeChannelId();
+      if (channelId) {
+        addCandidate(
+          `${window.location.origin}/feeds/videos.xml?channel_id=${channelId}`,
+          "site-recipe",
+          88,
+          "YouTube channel feed"
+        );
+      }
+
+      const playlistMatch = /[?&]list=([\w-]{10,})/.exec(window.location.search);
+      if (playlistMatch) {
+        addCandidate(
+          `${window.location.origin}/feeds/videos.xml?playlist_id=${playlistMatch[1]}`,
+          "site-recipe",
+          72,
+          "YouTube playlist feed"
+        );
+      }
+      return;
+    }
+
+    if (host === "github.com") {
+      const reserved = new Set([
+        "about", "collections", "contact", "customer-stories", "enterprise",
+        "events", "explore", "features", "issues", "login", "marketplace",
+        "new", "notifications", "orgs", "pricing", "pulls", "search",
+        "settings", "sponsors", "topics", "trending"
+      ]);
+      const repoMatch = /^\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/|$)/.exec(path);
+      if (repoMatch && !reserved.has(repoMatch[1].toLowerCase())) {
+        const repoBase = `/${repoMatch[1]}/${repoMatch[2]}`;
+        addCandidate(`${repoBase}/commits.atom`, "site-recipe", 74, "GitHub commits feed");
+        addCandidate(`${repoBase}/releases.atom`, "site-recipe", 72, "GitHub releases feed");
+        addCandidate(`${repoBase}/tags.atom`, "site-recipe", 70, "GitHub tags feed");
+      }
+      return;
+    }
+
+    if (host === "reddit.com" || host.endsWith(".reddit.com")) {
+      const redditMatch = /^\/(r|user|u)\/[\w-]+/.exec(path);
+      if (redditMatch) {
+        addCandidate(`${redditMatch[0]}/.rss`, "site-recipe", 78, "Reddit feed");
+      }
+    }
+  }
+
+  function findYouTubeChannelId() {
+    const metaSelectors = ['meta[itemprop="identifier"]', 'meta[itemprop="channelId"]'];
+    for (const selector of metaSelectors) {
+      const meta = document.querySelector(selector);
+      const value = meta ? stringify(meta.getAttribute("content")).trim() : "";
+      if (/^UC[\w-]{16,}$/.test(value)) {
+        return value;
+      }
+    }
+
+    const urlSources = [
+      window.location.href,
+      readAttribute('link[rel="canonical"]', "href"),
+      readAttribute('meta[property="og:url"]', "content")
+    ];
+    for (const urlSource of urlSources) {
+      const match = /\/channel\/(UC[\w-]{16,})/.exec(stringify(urlSource));
+      if (match) {
+        return match[1];
+      }
+    }
+
+    return null;
+  }
+
+  function readAttribute(selector, attribute) {
+    const element = document.querySelector(selector);
+    return element ? stringify(element.getAttribute(attribute)) : "";
+  }
+
   function collectFromHeuristicPaths() {
     const rootHeuristics = ["/feed", "/rss", "/rss.xml", "/feed.xml", "/atom.xml", "/index.xml"];
     for (const path of rootHeuristics) {
@@ -246,11 +343,20 @@
   }
 
   function looksLikeFeedUrl(value) {
-    return FEED_URL_PATTERN.test(stringify(value));
+    const text = stringify(value);
+    if (NON_FEED_URL_PATTERN.test(text)) {
+      return false;
+    }
+    return FEED_URL_PATTERN.test(text);
   }
 
   function isFeedType(value) {
     return FEED_MIME_PATTERN.test(stringify(value));
+  }
+
+  function looksLikeUrlValue(value) {
+    const text = stringify(value).trim();
+    return /^(https?:)?\/\//i.test(text) || text.startsWith("/") || text.startsWith("./");
   }
 
   function hasWordPressGeneratorMeta() {
