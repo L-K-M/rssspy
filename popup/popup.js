@@ -19,7 +19,10 @@ async function initPopup() {
       return;
     }
 
-    const result = await fetchStateWithRetries(tab.id, 10, 300);
+    // A full scan can take ~30s in the worst case (two batches of candidates,
+    // 7s fetch timeout each), so keep polling for as long as the popup is open
+    // instead of giving up after a few seconds.
+    const result = await fetchStateWithRetries(tab.id, 80, 400);
 
     renderResult(result);
   } catch (error) {
@@ -53,6 +56,10 @@ async function fetchStateWithRetries(tabId, maxAttempts, delayMs) {
 
     if (!result || result.status !== "scanning") {
       return result;
+    }
+
+    if (attempt === 2) {
+      setState("Validating feed candidates...");
     }
 
     if (attempt < maxAttempts - 1) {
@@ -91,7 +98,9 @@ function renderResult(result) {
     return;
   }
 
-  setState(`Found ${feeds.length} feed${feeds.length === 1 ? "" : "s"}. Click to copy.`);
+  setState(
+    `Found ${feeds.length} feed${feeds.length === 1 ? "" : "s"}. Click to copy, Ctrl+click to open.`
+  );
   for (const feed of feeds) {
     feedListElement.appendChild(createFeedItem(feed));
   }
@@ -112,19 +121,68 @@ function createFeedItem(feed) {
   url.textContent = stringify(feed.url);
 
   const meta = document.createElement("span");
-  meta.className = "feed-meta";
-  meta.textContent = cleanLabel(feed.source) || "validated";
+  meta.className = "feed-meta-row";
+  meta.appendChild(createChip(formatLabel(feed.format), "feed-format"));
+  if (feed.explicit) {
+    meta.appendChild(createChip("declared by page", "feed-declared"));
+  } else {
+    meta.appendChild(createChip(cleanLabel(feed.source) || "validated", "feed-source"));
+  }
 
   button.appendChild(title);
   button.appendChild(url);
   button.appendChild(meta);
 
-  button.addEventListener("click", () => {
+  button.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey) {
+      void openFeedUrl(stringify(feed.url));
+      return;
+    }
     void copyFeedUrl(stringify(feed.url));
+  });
+
+  button.addEventListener("auxclick", (event) => {
+    if (event.button === 1) {
+      void openFeedUrl(stringify(feed.url));
+    }
   });
 
   item.appendChild(button);
   return item;
+}
+
+function createChip(text, className) {
+  const chip = document.createElement("span");
+  chip.className = `feed-chip ${className}`;
+  chip.textContent = text;
+  return chip;
+}
+
+function formatLabel(format) {
+  switch (stringify(format)) {
+    case "rss":
+      return "RSS";
+    case "atom":
+      return "Atom";
+    case "json":
+      return "JSON Feed";
+    default:
+      return "Feed";
+  }
+}
+
+async function openFeedUrl(url) {
+  if (!url) {
+    setState("Feed URL is empty.", "error");
+    return;
+  }
+
+  try {
+    await browser.tabs.create({ url, active: false });
+    setState("Opened feed in a new tab.", "success");
+  } catch (_error) {
+    setState("Could not open the feed in a new tab.", "error");
+  }
 }
 
 async function copyFeedUrl(url) {
