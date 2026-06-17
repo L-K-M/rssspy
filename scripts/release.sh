@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Cuts a release: bumps the version, commits, tags "v<version>", and with --push
-# pushes branch + tag — which triggers .github/workflows/release.yml to build the
-# unsigned .zip (web-ext build) and publish the GitHub Release. web-ext builds the
-# .zip from the *committed* sources and takes the artifact's version (and filename,
-# e.g. rss_spy-1.0.2.zip) from manifest.json — the tag only triggers the workflow and
-# names the Release; CI does NOT derive the extension version from the tag. So the
-# committed version and the tag must agree, or you'd ship a release named "v1.5.0"
-# containing a 1.0.2 extension. manifest.json is the only place the version is
-# declared (there is no package.json).
+# Cuts a release: bumps the version in manifest.json, updates the README
+# <!-- version --> marker (if present), commits, tags "v<version>", and with --push
+# pushes branch + tag — which triggers .github/workflows/release.yml. CI re-checks
+# that the tag matches manifest.json, then packages the extension with web-ext
+# (signing through Mozilla Add-ons when AMO credentials are configured, otherwise an
+# unsigned .zip) and publishes the GitHub Release. CI packages the *committed* sources
+# and takes the artifact's version from manifest.json — the tag only triggers the
+# workflow and names the Release; it is NOT the version source. So the committed
+# version and the tag must agree (the release.yml guard fails the build otherwise).
+# manifest.json is the single source of truth for the version; package.json is tooling
+# config and declares no version, so the engine leaves it untouched.
 #
 #   scripts/release.sh 1.3.0          # bump manifest.json + README, commit, tag v1.3.0
 #   scripts/release.sh 1.3.0 --push   # …also push the commit + tag (CI then publishes)
@@ -19,7 +21,7 @@ set -euo pipefail
 
 export RELEASE_APP_NAME="RSS Spy"
 export RELEASE_KIND="webext"
-export RELEASE_CI_NOTE="CI (release.yml) will now build the web-ext .zip and publish the GitHub Release for <tag>."
+export RELEASE_CI_NOTE="CI (release.yml) will verify the tag, package the extension with web-ext, and publish the GitHub Release for <tag>."
 export RELEASE_INVOKED_AS="scripts/release.sh"
 
 BIN="${LKM_RELEASE_BIN:-lkm-release}"

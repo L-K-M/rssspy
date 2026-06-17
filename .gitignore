@@ -6,7 +6,6 @@
 .vscode/
 *.swp
 *~
-build.sh
 
 # Extension packaging artifacts
 web-ext-artifacts/
