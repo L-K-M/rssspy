@@ -21,13 +21,42 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      # Build an unsigned .zip from the extension sources at the repo root.
-      - name: Build extension
-        run: npx --yes web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest
+      - name: Install dependencies
+        run: npm ci
+
+      # The packaged add-on takes its version from manifest.json; the tag only
+      # names the Release. Guard against shipping a mismatched build — e.g. a
+      # Release tagged v1.5.0 that actually contains a 0.2.10 extension.
+      - name: Verify tag matches manifest version
+        run: |
+          manifest="$(node -p "require('./manifest.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match manifest.json version ${manifest}."
+            exit 1
+          fi
+          echo "Tag and manifest agree on ${manifest}."
+
+      # Sign through Mozilla Add-ons when AMO credentials are configured (yielding
+      # an installable signed .xpi); otherwise build an unsigned .zip. Either way
+      # the artifact lands in web-ext-artifacts/.
+      - name: Package extension
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [ -n "$WEB_EXT_API_KEY" ] && [ -n "$WEB_EXT_API_SECRET" ]; then
+            echo "AMO credentials found — signing (unlisted channel)."
+            npm run sign
+          else
+            echo "No AMO credentials — building an unsigned package."
+            npm run build
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: web-ext-artifacts/*.zip
+          files: web-ext-artifacts/*

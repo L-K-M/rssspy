@@ -22,8 +22,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      # Mozilla's web-ext lint validates the manifest and extension sources.
-      # manifest.json lives at the repository root, so the source dir is ".".
-      - name: web-ext lint
-        run: npx --yes web-ext lint --source-dir .
+      - name: Install dependencies
+        run: npm ci
+
+      # Mozilla's web-ext lint validates the manifest and packaged sources.
+      # web-ext-config.cjs scopes it (and build/sign) to the shipped files.
+      - name: Lint extension
+        run: npm run lint

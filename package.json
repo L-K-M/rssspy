@@ -1,0 +1,14 @@
+{
+  "name": "rssspy",
+  "private": true,
+  "description": "Discovers RSS, Atom, and JSON Feed URLs for the current site.",
+  "scripts": {
+    "lint": "web-ext lint",
+    "build": "web-ext build",
+    "sign": "web-ext sign --channel=unlisted",
+    "start": "web-ext run"
+  },
+  "devDependencies": {
+    "web-ext": "^10.4.0"
+  }
+}
