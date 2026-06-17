@@ -2,6 +2,9 @@
 
 RSS Spy is a Firefox extension that detects RSS/Atom/JSON feeds for the currently open page.
 
+> [!IMPORTANT]
+> LLM Disclosure: Much of this code base was written with the help of large language models — AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 # Features
 
 - Scans the current page for feed candidates using:
@@ -50,12 +53,21 @@ At this point, you should also open `manifest.json` and set the `browser_specifi
 
 ## 3. Build the extension:
 
+Store your AMO credentials in `../web-ext-credentials.env`:
+
 ```bash
-web-ext build --overwrite-dest
-web-ext sign --api-key="[JWT issuer]" --api-secret="[JWT secret]" --channel="unlisted"
+WEB_EXT_API_KEY="your-api-key"
+WEB_EXT_API_SECRET="your-api-secret"
 ```
 
-This creates a ZIP file called `web-ext-artifacts/rss_spy-1.0.3.zip`, and the signed extension called `web-ext-artifacts/[id]-[version].xpi`.
+Then run:
+
+```bash
+chmod +x build.sh
+./build.sh
+```
+
+This creates build artifacts in `web-ext-artifacts/`, including a signed `.xpi` if signing succeeds. Running `./build.sh` without `../web-ext-credentials.env` creates only the unsigned build artifact.
 
 ## 4. Install the signed extension:
 
