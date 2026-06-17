@@ -58,7 +58,61 @@ const EXTENSION_ORIGIN = readExtensionOrigin();
 let networkGuardActive = false;
 installNetworkGuard();
 
+// Firefox MV3 background scripts are event pages: they are suspended after a
+// short idle period and restarted on demand, wiping module state. Per-tab scan
+// results are therefore written through to storage.session (in-memory, cleared
+// when the browser exits) so the popup still gets an answer after a restart;
+// the Map acts as a synchronous cache for the current background instance.
 const tabState = new Map();
+const TAB_STATE_STORAGE_PREFIX = "tabState:";
+
+async function setTabState(tabId, state) {
+  tabState.set(tabId, state);
+  if (!hasSessionStorage()) {
+    return;
+  }
+  try {
+    await browser.storage.session.set({ [TAB_STATE_STORAGE_PREFIX + tabId]: state });
+  } catch (_error) {
+    // Persistence is best-effort; the in-memory state still serves this instance.
+  }
+}
+
+async function getTabState(tabId) {
+  if (tabState.has(tabId)) {
+    return tabState.get(tabId);
+  }
+  if (!hasSessionStorage()) {
+    return undefined;
+  }
+  try {
+    const key = TAB_STATE_STORAGE_PREFIX + tabId;
+    const stored = await browser.storage.session.get(key);
+    if (stored && Object.prototype.hasOwnProperty.call(stored, key)) {
+      tabState.set(tabId, stored[key]);
+      return stored[key];
+    }
+  } catch (_error) {
+    // Fall through to undefined; treated as "idle".
+  }
+  return undefined;
+}
+
+async function deleteTabState(tabId) {
+  tabState.delete(tabId);
+  if (!hasSessionStorage()) {
+    return;
+  }
+  try {
+    await browser.storage.session.remove(TAB_STATE_STORAGE_PREFIX + tabId);
+  } catch (_error) {
+    // Best-effort cleanup only.
+  }
+}
+
+function hasSessionStorage() {
+  return Boolean(browser.storage && browser.storage.session);
+}
 
 browser.runtime.onMessage.addListener((message, sender) => {
   if (!message || typeof message !== "object") {
@@ -86,19 +140,19 @@ browser.runtime.onMessage.addListener((message, sender) => {
       });
     }
 
-    return Promise.resolve(readStateForTab(tabId));
+    return readStateForTab(tabId);
   }
 
   return undefined;
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
-  tabState.delete(tabId);
+  void deleteTabState(tabId);
 });
 
 browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
-    tabState.delete(tabId);
+    void deleteTabState(tabId);
     void clearBadge(tabId);
   }
 });
@@ -106,11 +160,11 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
 async function ingestScanResult(tabId, payload) {
   const pageUrl = typeof payload.pageUrl === "string" ? payload.pageUrl : "";
   const rawCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-  const currentState = tabState.get(tabId);
+  const currentState = await getTabState(tabId);
 
   const nextScanId = (currentState && currentState.scanId ? currentState.scanId : 0) + 1;
 
-  tabState.set(tabId, {
+  await setTabState(tabId, {
     status: "scanning",
     pageUrl,
     feeds: [],
@@ -140,7 +194,7 @@ async function ingestScanResult(tabId, payload) {
       }
     }
 
-    tabState.set(tabId, {
+    await setTabState(tabId, {
       status: "ready",
       pageUrl,
       feeds,
@@ -154,7 +208,7 @@ async function ingestScanResult(tabId, payload) {
       return;
     }
 
-    tabState.set(tabId, {
+    await setTabState(tabId, {
       status: "error",
       pageUrl,
       feeds: [],
@@ -167,13 +221,16 @@ async function ingestScanResult(tabId, payload) {
   }
 }
 
+// Staleness only matters within a single background instance (a scan that was
+// interrupted by an event-page restart is gone anyway), so the synchronous
+// in-memory cache is authoritative here.
 function isStaleScan(tabId, scanId) {
   const latest = tabState.get(tabId);
   return !latest || latest.scanId !== scanId;
 }
 
-function readStateForTab(tabId) {
-  const state = tabState.get(tabId);
+async function readStateForTab(tabId) {
+  const state = await getTabState(tabId);
   if (!state) {
     return {
       status: "idle",

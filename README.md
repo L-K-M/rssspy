@@ -25,6 +25,7 @@ RSS Spy requests the following permissions:
 - `tabs`: identify the active tab so the popup can show feeds for the page you are viewing.
 - `clipboardWrite`: copy a feed URL when you click it in the popup.
 - `dns`: resolve candidate feed hostnames so requests to private/internal addresses can be blocked before they are sent.
+- `storage`: keep per-tab scan results in session storage (in memory, cleared when the browser exits) so they survive background event-page restarts.
 - `webRequest` / `webRequestBlocking`: re-check every validation request the extension makes — including each redirect hop — and cancel any that target a non-public address. This is what lets the extension safely follow redirects while still avoiding requests to internal hosts.
 - `<all_urls>` (host permission): read the current page and fetch its candidate feed URLs for validation.
 
