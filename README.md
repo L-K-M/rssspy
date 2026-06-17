@@ -1,5 +1,7 @@
 # RSS Spy
 
+**Version:** <!-- version -->1.0.3<!-- /version -->
+
 RSS Spy is a Firefox extension that detects RSS/Atom/JSON feeds for the currently open page.
 
 > [!IMPORTANT]
@@ -35,56 +37,42 @@ The extension only fetches feed candidates that belong to the site you are visit
 3. Click **Load Temporary Add-on**.
 4. Choose the repository `manifest.json` file.
 
+# Development
+
+The tooling is [`web-ext`](https://extensionworkshop.com/documentation/develop/web-ext-command-reference/), Mozilla's official command-line tool, driven through `npm` scripts. Install it once:
+
+```bash
+npm install
+```
+
+Then:
+
+```bash
+npm run lint     # validate the manifest and sources (web-ext lint)
+npm run build    # package an unsigned .zip into web-ext-artifacts/
+npm run start    # run the add-on in a temporary Firefox profile (web-ext run)
+```
+
+`npm run build` writes a version-stamped archive, e.g. `web-ext-artifacts/rss_spy-1.0.3.zip`, containing only the runtime files.
+
 # Permanent Installation
 
-To install the extension permanently, you need to package and sign it. `web-ext` is Mozilla's official command-line tool for building and signing extensions.
-
-## 1. Install web-ext:
+To install the extension permanently in Firefox, it must be signed by Mozilla. Set `browser_specific_settings.gecko.id` in `manifest.json` to a unique id you control, generate [Mozilla Add-ons API credentials](https://addons.mozilla.org/en-US/developers/addon/api/key/), then:
 
 ```bash
-npm install --global web-ext
+export WEB_EXT_API_KEY="your-jwt-issuer"
+export WEB_EXT_API_SECRET="your-jwt-secret"
+npm run sign
 ```
 
-## 2. Setup your Mozilla Add-ons account:
+This writes a signed `.xpi` to `web-ext-artifacts/`. Install it via Firefox's Extension Manager (`about:addons`) → gear icon → "Install Add-on From File…".
 
-Register on [addons.mozilla.org](https://addons.mozilla.org). Then generate API credentials from [addons.mozilla.org/en-US/developers/addon/api/key/](https://addons.mozilla.org/en-US/developers/addon/api/key/).
+# Releases
 
-At this point, you should also open `manifest.json` and set the `browser_specific_settings.gecko.id` field to a unique identifier for your extension.
-
-## 3. Build the extension:
-
-Store your AMO credentials in `../web-ext-credentials.env`:
+Releases are cut by pushing a version tag. The shared [release tool](https://github.com/L-K-M/release-tool) does it in one step:
 
 ```bash
-WEB_EXT_API_KEY="your-api-key"
-WEB_EXT_API_SECRET="your-api-secret"
+scripts/release.sh 1.2.3 --push     # bump manifest.json, commit, tag v1.2.3, and push
 ```
 
-Then run:
-
-```bash
-chmod +x build.sh
-./build.sh
-```
-
-This creates build artifacts in `web-ext-artifacts/`, including a signed `.xpi` if signing succeeds. Running `./build.sh` without `../web-ext-credentials.env` creates only the unsigned build artifact.
-
-## 4. Install the signed extension:
-
-You can now go to Firefox's Extension Manager (`about:addons`), click on the gear icon, and select "Install Add-on From File..." to install the signed extension.
-
-# Testing During Development
-
-Run the extension in a temporary Firefox instance:
-
-```bash
-web-ext run
-```
-
-# Linting
-
-Check for common issues:
-
-```bash
-web-ext lint
-```
+Pushing the `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which verifies the tag matches `manifest.json`, packages the extension with `web-ext` (signing through Mozilla Add-ons when the `AMO_JWT_ISSUER` / `AMO_JWT_SECRET` secrets are set, otherwise an unsigned `.zip`), and publishes a GitHub Release with auto-generated notes. Every pull request and push to `main` is linted by [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The `<!-- version -->` marker near the top of this file is kept in step by the release tool. See [CICD.md](CICD.md) for the full pipeline.
