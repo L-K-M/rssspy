@@ -2,6 +2,8 @@
 
 **Version:** [<!-- version -->1.0.3<!-- /version -->](https://github.com/L-K-M/rssspy/releases/latest)
 
+<img src="screenshot.png" width="400" alt="Screenshot of RSS Spy">
+
 RSS Spy is a Firefox extension that detects RSS/Atom/JSON feeds for the currently open page.
 
 > [!IMPORTANT]
