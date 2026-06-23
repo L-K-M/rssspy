@@ -21,3 +21,4 @@ temp/
 node_modules/
 coverage/
 dist/
+/ISSUES.md
