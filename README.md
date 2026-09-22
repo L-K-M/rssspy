@@ -1,5 +1,8 @@
 # RSS Spy
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 **Version:** [<!-- version -->1.0.4<!-- /version -->](https://github.com/L-K-M/rssspy/releases/latest)
 
 <img src="screenshot.png" width="400" alt="Screenshot of RSS Spy">
